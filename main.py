@@ -59,6 +59,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router)
     app.include_router(company_created_router)
+
+    @app.get("/", tags=["health"])
+    async def root() -> dict[str, str]:
+        return {"status": "ok", "service": "fundradar-validate-email"}
+
     return app
 
 

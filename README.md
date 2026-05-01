@@ -55,15 +55,16 @@ ports — swap either adapter without touching domain or presentation.
 ## Local setup
 
 ```bash
-conda env create -f environment.yml
-conda activate fundradar-validate-email
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 cp .env.example .env  # fill in RESEND_API_KEY + FROM_EMAIL
-uvicorn main:app --reload
+hypercorn main:app --bind 0.0.0.0:8080 --reload
 ```
 
 The service exposes:
 
-- `GET /health`
+- `GET /` — readiness probe (used by Railway healthcheck)
+- `GET /health` — same shape as `/`, kept for backwards compat
 - `POST /webhooks/supabase/company-created`
 
 ### Example webhook payload
@@ -135,13 +136,14 @@ curl -s http://127.0.0.1:8000/health
 
 ## Railway deployment
 
-Start command:
+Deployed as a Docker image. `railway.json` points Railway at `Dockerfile`,
+which runs:
 
 ```
-hypercorn main:app --bind 0.0.0.0:$PORT
+hypercorn main:app --bind "0.0.0.0:${PORT:-8080}"
 ```
 
-Configured in `Procfile` and `railway.toml`. Health check path: `/health`.
+Healthcheck path: `/`. Build context filtered by `.dockerignore`.
 
 ## Tests
 
