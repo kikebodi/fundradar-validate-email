@@ -55,6 +55,45 @@ The service exposes:
 
 The handler returns `202 Accepted` with the Resend message id.
 
+### Call the endpoint locally with fake data
+
+With the server running on `http://127.0.0.1:8000`:
+
+```bash
+curl -i -X POST http://127.0.0.1:8000/webhooks/supabase/company-created \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "INSERT",
+    "table": "companies",
+    "schema": "public",
+    "record": {
+      "id": "9b1c4f9a-1e90-4d2b-a4e6-3a4d3f0d9c11",
+      "email": "founder@example.com",
+      "name": "Acme Inc"
+    }
+  }'
+```
+
+Expected response:
+
+```
+HTTP/1.1 202 Accepted
+content-type: application/json
+
+{"status":"accepted","message_id":"<resend-message-id>"}
+```
+
+Health check:
+
+```bash
+curl -s http://127.0.0.1:8000/health
+# {"status":"ok"}
+```
+
+> Tip: set `FROM_EMAIL` to a sender verified in your Resend dashboard, and use a
+> recipient you control (e.g. your own address) so the test email actually
+> lands. With an invalid `RESEND_API_KEY` you'll get a `502 Bad Gateway`.
+
 ## Configuration (.env)
 
 | Var | Required | Default |
