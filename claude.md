@@ -278,7 +278,7 @@ Add a new dependency only by pinning it in `requirements.txt`.
 - Healthcheck path: `/`.
 - Container runs:
   ```
-  hypercorn main:app --bind "0.0.0.0:${PORT:-8080}"
+  hypercorn main:app --bind 0.0.0.0:8000
   ```
 - `Dockerfile` is the single source of truth for the start command (no
   `Procfile`).

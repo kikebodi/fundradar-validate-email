@@ -58,7 +58,7 @@ ports — swap either adapter without touching domain or presentation.
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # fill in RESEND_API_KEY + FROM_EMAIL
-hypercorn main:app --bind 0.0.0.0:8080 --reload
+hypercorn main:app --bind 0.0.0.0:8000 --reload
 ```
 
 The service exposes:
@@ -132,7 +132,6 @@ curl -s http://127.0.0.1:8000/health
 | `BASE_URL` | no | `https://fundradar.ai` |
 | `REQUEST_TIMEOUT` | no | `10.0` |
 | `MAX_RETRIES` | no | `3` |
-| `PORT` | no | `8000` |
 
 ## Railway deployment
 
@@ -140,7 +139,7 @@ Deployed as a Docker image. `railway.json` points Railway at `Dockerfile`,
 which runs:
 
 ```
-hypercorn main:app --bind "0.0.0.0:${PORT:-8080}"
+hypercorn main:app --bind 0.0.0.0:8000
 ```
 
 Healthcheck path: `/`. Build context filtered by `.dockerignore`.
