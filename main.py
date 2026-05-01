@@ -37,16 +37,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     _configure_logging(settings.log_level)
 
-    sender = build_email_sender(settings)
-    service = build_validation_email_service(sender, settings)
+    app.state.email_sender = None
+    app.state.validation_email_service = None
 
-    app.state.email_sender = sender
-    app.state.validation_email_service = service
-    logger.info("startup_complete base_url=%s", settings.base_url)
+    try:
+        sender = build_email_sender(settings)
+        service = build_validation_email_service(sender, settings)
+    except RuntimeError as exc:
+        logger.warning(
+            "startup_skipped_email_subsystem reason=%s — webhook will return 503 "
+            "until RESEND_API_KEY and FROM_EMAIL are set",
+            exc,
+        )
+        sender = None
+        service = None
+    else:
+        app.state.email_sender = sender
+        app.state.validation_email_service = service
+        logger.info("startup_complete base_url=%s", settings.base_url)
+
     try:
         yield
     finally:
-        await sender.aclose()
+        if sender is not None:
+            await sender.aclose()
         logger.info("shutdown_complete")
 
 
