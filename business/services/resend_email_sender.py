@@ -1,22 +1,27 @@
+"""
+Concrete EmailSender backed by the Resend HTTP API.
+
+Owns the httpx.AsyncClient lifecycle. Retries on transient failures
+(transport errors, 429, 5xx) with exponential backoff; surfaces a clean
+EmailSendError on terminal failure.
+"""
+
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 
-from app.core.logging import get_logger
-from app.models.email import ResendEmailRequest, ResendEmailResponse
+from business.interfaces.email_sender import EmailSender, EmailSendError
+from domain.models.email import EmailMessage, SendResult
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
-
-class ResendError(Exception):
-    def __init__(self, message: str, status_code: int | None = None) -> None:
-        super().__init__(message)
-        self.status_code = status_code
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
-class ResendClient:
+class ResendEmailSender(EmailSender):
     BASE_URL = "https://api.resend.com"
     EMAILS_PATH = "/emails"
 
@@ -26,7 +31,6 @@ class ResendClient:
         timeout: float = 10.0,
         max_retries: int = 3,
     ) -> None:
-        self._api_key = api_key
         self._max_retries = max_retries
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
@@ -41,8 +45,14 @@ class ResendClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def send_email(self, request: ResendEmailRequest) -> ResendEmailResponse:
-        payload = request.model_dump(by_alias=True, exclude_none=True)
+    async def send(self, message: EmailMessage) -> SendResult:
+        payload = {
+            "from": message.sender,
+            "to": [message.recipient],
+            "subject": message.subject,
+            "html": message.html_body,
+        }
+
         attempt = 0
         backoff = 0.5
         while True:
@@ -56,15 +66,16 @@ class ResendClient:
                         attempt,
                         exc.__class__.__name__,
                     )
-                    raise ResendError(f"transport error: {exc}") from exc
+                    raise EmailSendError(f"transport error: {exc}") from exc
                 await asyncio.sleep(backoff)
                 backoff *= 2
                 continue
 
             if response.status_code < 300:
-                return ResendEmailResponse.model_validate(response.json())
+                provider_id = str(response.json().get("id", ""))
+                return SendResult(provider_message_id=provider_id)
 
-            if response.status_code in {429, 500, 502, 503, 504} and attempt < self._max_retries:
+            if response.status_code in _RETRYABLE_STATUS and attempt < self._max_retries:
                 await asyncio.sleep(backoff)
                 backoff *= 2
                 continue
@@ -74,7 +85,7 @@ class ResendClient:
                 response.status_code,
                 response.text[:512],
             )
-            raise ResendError(
+            raise EmailSendError(
                 f"resend send failed: {response.status_code}",
                 status_code=response.status_code,
             )

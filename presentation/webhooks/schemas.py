@@ -1,3 +1,11 @@
+"""
+Transport DTOs for the Supabase webhook.
+
+These describe the wire shape Supabase sends and the response we return.
+Kept in the presentation layer because they're a transport contract,
+not part of the domain.
+"""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -6,7 +14,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
-class CompanyRecord(BaseModel):
+class CompanyRecordDTO(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: UUID
@@ -20,7 +28,7 @@ class CompanyCreatedWebhook(BaseModel):
     type: Literal["INSERT"]
     table: Literal["companies"]
     schema_: str = Field(alias="schema")
-    record: CompanyRecord
+    record: CompanyRecordDTO
 
 
 class WebhookAck(BaseModel):

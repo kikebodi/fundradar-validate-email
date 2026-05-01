@@ -5,24 +5,53 @@ row is inserted into the Supabase `companies` table.
 
 ## Architecture
 
-```
-/app
-  /api        FastAPI routers (no business logic)
-  /services   email orchestration
-  /clients    Resend HTTP client (async httpx)
-  /models     Pydantic v2 schemas
-  /core       config, logging, template env
-/templates    HTML email templates
-/tests        pytest + asyncio
-```
-
-Trigger flow:
+The codebase follows a Presentation / Business / Domain layered structure
+(same convention as [`fundradar-company-research`](https://github.com/kikebodi/fundradar-company-research)):
 
 ```
-Supabase webhook -> POST /webhooks/supabase/company-created
-                 -> EmailService.send_validation_email
-                 -> ResendClient -> Resend API
+/presentation              Thin HTTP layer — no business logic
+  /webhooks
+    company_created.py     Supabase webhook router
+    schemas.py             Transport DTOs
+  /api
+    health.py
+  dependencies.py          FastAPI DI helpers
+
+/business                  Use cases and adapters
+  /config
+    settings.py            .env + shell env loader
+  /interfaces              Ports (ABCs)
+    email_sender.py        EmailSender
+    template_renderer.py   TemplateRenderer
+  /services                Concrete adapters
+    resend_email_sender.py
+    jinja_template_renderer.py
+    validation_email_service.py    Orchestrator
+  factory.py               Wires production adapters from settings
+
+/domain                    Pure entities and value objects
+  /models
+    company.py             Company
+    email.py               EmailMessage, ValidationLinks, SendResult
+
+/templates                 HTML email templates
+/scripts                   Manual operator scripts
+/tests                     pytest + asyncio
+main.py                    FastAPI entrypoint
 ```
+
+Flow:
+
+```
+Supabase webhook
+  -> presentation/webhooks/company_created.py
+  -> business/services/validation_email_service.py
+  -> business/services/jinja_template_renderer.py  (renders HTML)
+  -> business/services/resend_email_sender.py      (POST api.resend.com)
+```
+
+The orchestrator depends only on the `EmailSender` and `TemplateRenderer`
+ports — swap either adapter without touching domain or presentation.
 
 ## Local setup
 
@@ -30,7 +59,7 @@ Supabase webhook -> POST /webhooks/supabase/company-created
 conda env create -f environment.yml
 conda activate fundradar-validate-email
 cp .env.example .env  # fill in RESEND_API_KEY + FROM_EMAIL
-uvicorn app.main:app --reload
+uvicorn main:app --reload
 ```
 
 The service exposes:
@@ -110,7 +139,7 @@ curl -s http://127.0.0.1:8000/health
 Start command:
 
 ```
-hypercorn app.main:app --bind 0.0.0.0:$PORT
+hypercorn main:app --bind 0.0.0.0:$PORT
 ```
 
 Configured in `Procfile` and `railway.toml`. Health check path: `/health`.
@@ -123,9 +152,9 @@ pytest
 
 ## Manual end-to-end send
 
-`scripts/send_test_validation_email.py` exercises `EmailService` against the
-real Resend API. Useful for verifying your `RESEND_API_KEY`, sender domain,
-and template rendering.
+`scripts/send_test_validation_email.py` exercises `ValidationEmailService`
+against the real Resend API. Useful for verifying your `RESEND_API_KEY`,
+sender domain, and template rendering.
 
 ```bash
 python scripts/send_test_validation_email.py --to you@example.com

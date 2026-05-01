@@ -1,45 +1,45 @@
 from __future__ import annotations
 
 from typing import AsyncIterator
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 
-from app.main import create_app
-from app.models.email import ResendEmailResponse
-from app.services.email_service import EmailService
+from business.services.jinja_template_renderer import JinjaTemplateRenderer
+from domain.models.company import Company
+from domain.models.email import EmailMessage, SendResult
+from main import create_app
 
 
-class StubEmailService:
+class StubEmailSender:
     def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
+        self.sent: list[EmailMessage] = []
 
-    async def send_validation_email(
-        self,
-        *,
-        recipient: str,
-        client_id: UUID,
-        client_name: str | None = None,
-    ) -> ResendEmailResponse:
-        self.calls.append(
-            {
-                "recipient": recipient,
-                "client_id": client_id,
-                "client_name": client_name,
-            }
-        )
-        return ResendEmailResponse(id="msg_test_123")
+    async def send(self, message: EmailMessage) -> SendResult:
+        self.sent.append(message)
+        return SendResult(provider_message_id="msg_test_123")
+
+    async def aclose(self) -> None: ...
+
+
+class StubValidationEmailService:
+    def __init__(self) -> None:
+        self.calls: list[Company] = []
+
+    async def send_validation_email(self, company: Company) -> SendResult:
+        self.calls.append(company)
+        return SendResult(provider_message_id="msg_test_123")
 
 
 @pytest.fixture
-async def client_and_stub() -> AsyncIterator[tuple[AsyncClient, StubEmailService]]:
+async def client_and_stub() -> AsyncIterator[tuple[AsyncClient, StubValidationEmailService]]:
     app = create_app()
-    stub = StubEmailService()
+    stub = StubValidationEmailService()
 
     async with LifespanManager(app):
-        app.state.email_service = stub  # type: ignore[assignment]
+        app.state.validation_email_service = stub  # type: ignore[assignment]
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac, stub
@@ -47,7 +47,7 @@ async def client_and_stub() -> AsyncIterator[tuple[AsyncClient, StubEmailService
 
 @pytest.mark.asyncio
 async def test_company_created_sends_email(
-    client_and_stub: tuple[AsyncClient, StubEmailService],
+    client_and_stub: tuple[AsyncClient, StubValidationEmailService],
 ) -> None:
     ac, stub = client_and_stub
     company_id = uuid4()
@@ -65,18 +65,17 @@ async def test_company_created_sends_email(
     response = await ac.post("/webhooks/supabase/company-created", json=payload)
 
     assert response.status_code == 202
-    body = response.json()
-    assert body == {"status": "accepted", "message_id": "msg_test_123"}
+    assert response.json() == {"status": "accepted", "message_id": "msg_test_123"}
     assert len(stub.calls) == 1
-    call = stub.calls[0]
-    assert call["recipient"] == "founder@example.com"
-    assert call["client_id"] == company_id
-    assert call["client_name"] == "Acme Inc"
+    company = stub.calls[0]
+    assert company.id == company_id
+    assert company.email == "founder@example.com"
+    assert company.name == "Acme Inc"
 
 
 @pytest.mark.asyncio
 async def test_company_created_rejects_invalid_payload(
-    client_and_stub: tuple[AsyncClient, StubEmailService],
+    client_and_stub: tuple[AsyncClient, StubValidationEmailService],
 ) -> None:
     ac, stub = client_and_stub
     response = await ac.post(
@@ -88,21 +87,22 @@ async def test_company_created_rejects_invalid_payload(
 
 
 @pytest.mark.asyncio
-async def test_email_service_renders_links(
-    client_and_stub: tuple[AsyncClient, StubEmailService],
-) -> None:
-    from app.core.templates import build_template_env
+async def test_validation_email_service_renders_links() -> None:
+    from business.services.validation_email_service import ValidationEmailService
 
-    env = build_template_env()
-    template = env.get_template("validate_email_template.html")
-    company_id = uuid4()
-    html = template.render(
-        client_id=str(company_id),
-        client_name=None,
-        validate_url=f"https://fundradar.ai/validate?id={company_id}",
-        unsubscribe_url=f"https://fundradar.ai/unsubscribe?id={company_id}",
+    sender = StubEmailSender()
+    service = ValidationEmailService(
+        sender=sender,
+        renderer=JinjaTemplateRenderer(),
+        from_email="FundRadar <noreply@fundradar.ai>",
+        base_url="https://fundradar.ai",
     )
-    assert f"https://fundradar.ai/validate?id={company_id}" in html
-    assert f"https://fundradar.ai/unsubscribe?id={company_id}" in html
-    # ensure the type checker covers the EmailService symbol used elsewhere
-    assert EmailService.__name__ == "EmailService"
+    company = Company(id=uuid4(), email="founder@example.com", name="Acme Inc")
+
+    result = await service.send_validation_email(company)
+
+    assert result.provider_message_id == "msg_test_123"
+    assert len(sender.sent) == 1
+    html = sender.sent[0].html_body
+    assert f"https://fundradar.ai/validate?id={company.id}" in html
+    assert f"https://fundradar.ai/unsubscribe?id={company.id}" in html
