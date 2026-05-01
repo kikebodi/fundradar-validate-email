@@ -35,7 +35,6 @@ The codebase follows a Presentation / Business / Domain layered structure
     email.py               EmailMessage, ValidationLinks, SendResult
 
 /templates                 HTML email templates
-/scripts                   Manual operator scripts
 /tests                     pytest + asyncio
 main.py                    FastAPI entrypoint
 ```
@@ -148,18 +147,4 @@ Configured in `Procfile` and `railway.toml`. Health check path: `/health`.
 
 ```bash
 pytest
-```
-
-## Manual end-to-end send
-
-`scripts/send_test_validation_email.py` exercises `ValidationEmailService`
-against the real Resend API. Useful for verifying your `RESEND_API_KEY`,
-sender domain, and template rendering.
-
-```bash
-python scripts/send_test_validation_email.py --to you@example.com
-python scripts/send_test_validation_email.py \
-  --to you@example.com \
-  --name "Acme Inc" \
-  --client-id 9b1c4f9a-1e90-4d2b-a4e6-3a4d3f0d9c11
 ```
